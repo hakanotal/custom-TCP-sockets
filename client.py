@@ -4,6 +4,9 @@ import time
 import threading
 import string    
 
+startString = "Start_Connection"
+privateString = "PRIVATE_KEY_THIRTY_TWO_CHARACTER"
+
 
 class ClientSocket:
     def __init__(self, HOST, PORT):
@@ -17,18 +20,27 @@ class ClientSocket:
         print(f'[CONNECTING] {self.HOST}:{self.PORT}')
 
         if self.auth():
-            connected = True
-            while connected:
-                self.recievePacket()
-                time.sleep(3)
-                self.sendPacket(1)
-                connected = False
+            threading.Thread(target=self.handleServer).start()
+            self.sendPacket(0)
+            time.sleep(2)
+            self.sendPacket(3, '32')
+            time.sleep(2)
+            self.sendPacket(2)
+                
     
+    def handleServer(self):
+        connected = True
+        while connected:
+            packet_type, payload = self.recievePacket()
+            if packet_type == 0: # Question
+                print(f'[QUESTION] {payload}')
+            elif packet_type == 1: # Remaining time
+                print(f'[TIME] Remaining: {payload}')
+            elif packet_type == 2: # End game
+                print(f'[POINTS] Points: {payload}')
+
 
     def auth(self):
-        startString = "Start_Connection"
-        privateString = "PRIVATE_KEY_THIRTY_TWO_CHARACTER"
-
         self.socket.send(startString.encode())
         print(f'[AUTH SENT] Start: {startString}')
 
@@ -40,44 +52,52 @@ class ClientSocket:
         print(f'[AUTH SENT] SHA1: {sha1Result}')
 
         message = self.socket.recv(256).decode()
-        print(f'[AUTH RECIEVED] Message: {message}')
+        print(f'[AUTH RECIEVED] {message}')
 
         if message == "Authentication unsuccesful.":
             return False
 
-        answer = input(message)
+        answer = input(message+" ")
         self.socket.send(answer.encode())
         print(f'[AUTH SENT] Answer: {answer}')
 
         return True
 
-
-    def sendPacket(self, packet_type):
-        payload = '-empty-'
-        payload_size = 0
-
-        if packet_type == 3: #Guess
-            payload = str(input("Guess number between [0-36]: ")).encode()
-            payload_size = len(payload)
-
-        header = bytes([packet_type, payload_size])
+    
+    def sendPacket(self, packet_type, data=''):
+        payload = data.encode() # <CharArray>
+        payload_size = len(payload)
+        packet = bytes([packet_type, payload_size])+payload
   
-        self.socket.send(header)
-        if packet_type == 3:
-            self.socket.send(payload)
-        print(f'[SENT] Header: {header} - Payload: {payload}')
-
-        if packet_type == 1:
-            print(f'[DISCONNECTING]')
+        self.socket.send(packet)
+        print(f'[SENT] PacketType: {packet_type} - Payload: {payload}')
     
 
     def recievePacket(self):
-        header = self.socket.recv(2)
-        packet_type = header[0]
-        payload_size = header[1]
-        payload = self.socket.recv(payload_size)
+        packet = self.socket.recv(1024)
+        packet_type = packet[0]
+        payload_size = packet[1]
 
-        print(f'[RECIEVED] Header: {header} - Payload: {payload}')
+        if packet_type == 0: # <CharArray>
+            payload = packet[2:2+payload_size].decode()
+        elif packet_type == 1: # <Uint-16>
+            payload = int.from_bytes(packet[2:2+payload_size], byteorder='big', signed=False)
+        elif packet_type == 2: # <Int-16>
+            payload = int.from_bytes(packet[2:2+payload_size], byteorder='big', signed=True)
+
+        print(f'[RECIEVED] PacketType: {packet_type} - Payload: {packet[2:2+payload_size]}')
+        return (packet_type, payload)
+
+
+
+'''
+    Example
+        packet_type :   3  <Uint8>
+        payload_size :  4  <Uint8>
+        payload :       even <Char array>
+        
+        packet :        b'\x03\x02even'
+'''
 
 
 if __name__=="__main__":
