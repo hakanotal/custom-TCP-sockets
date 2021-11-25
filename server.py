@@ -87,13 +87,11 @@ class ServerSocket:
 
                 elif game.started and packet_type == 3: # Guess
                     game.guess(payload)
-                    self.sendPacket(conn, addr, 2, game.points)
                     print(f'[GUESS] Number: {game.number} - Guess: {payload} - Points: {game.points}')
                     game.number = random.randint(0,36)
 
                 else:
                     print(f'[ERROR] PacketType: {packet_type} - Payload: {payload}')
-                    connected = False
 
         conn.close()  
 
@@ -157,15 +155,26 @@ class ServerSocket:
     def timer(self, conn, addr, game):   
         remaining = 30
         while remaining > 3:
-            remaining = game.remaining()
+            remaining = max(game.remaining(),0)
             self.sendPacket(conn, addr, 1, remaining)
             print(f'[TIME] Remaining: {remaining}')
             time.sleep(3)  
 
-        self.sendPacket(conn, addr, 2, game.points)
-        print(f'[TERMINATE] Points: {game.points}')
-        game.reset()
+        if game.started:
+            self.sendPacket(conn, addr, 2, game.points)
+            print(f'[TERMINATE] Points: {game.points}')
+            game.reset()
 
+
+
+'''
+    Example
+        packet_type :   2  <Uint8>
+        payload_size :  2  <Uint8>
+        payload :       -1 <Int16>
+        
+        packet :        b'\x02\x02\xff\xff'
+'''
 
 if __name__=="__main__":
     s = ServerSocket('127.0.0.1', 3001)

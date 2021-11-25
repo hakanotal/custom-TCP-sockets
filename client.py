@@ -3,10 +3,50 @@ import socket
 import time
 import threading
 import string    
+import os
+
 
 startString = "Start_Connection"
 privateString = "PRIVATE_KEY_THIRTY_TWO_CHARACTER"
 
+clear = lambda : os.system('cls' if os.name == 'nt' else 'clear')
+
+class Game:
+    def __init__(self, client):
+        self.started = False
+        self.time = 30
+        self.client = client
+        self.choice = -1
+        self.gotPoints = False
+        self.points = -1
+    
+    def printMenu(self):       
+        clear()
+        print("***** Number Guessing Game *****")
+        if not self.started:
+            if self.gotPoints:
+                print(f'Game over. You got {self.points} points!')
+            print('1. Start game\nEnter your choice:')
+        else:
+            print(f'Remaining time : {self.time}\n1. Terminate game\n2. Get time\n3. Make a guess\nEnter your choice:')
+            if self.choice == 3:
+                print("3\nWhat is your guess? Number, even, odd?")
+
+    def takeInput(self):
+        self.choice = int(input())
+
+        if not self.started:
+            self.client.sendPacket(self.choice-1)
+        elif self.choice == 3:
+            g = input("What is your guess? Number, even, odd?\n")
+            self.client.sendPacket(self.choice, g)
+            self.printMenu()
+        else:
+            self.client.sendPacket(self.choice)
+
+        self.choice = -1
+
+    
 
 class ClientSocket:
     def __init__(self, HOST, PORT):
@@ -20,24 +60,32 @@ class ClientSocket:
         print(f'[CONNECTING] {self.HOST}:{self.PORT}')
 
         if self.auth():
-            threading.Thread(target=self.handleServer).start()
-            self.sendPacket(0)
-            time.sleep(2)
-            self.sendPacket(3, '32')
-            time.sleep(2)
-            self.sendPacket(2)
-                
+            game = Game(self)
+            threading.Thread(target=self.handleServer, args=(game,)).start()
+            #self.sendPacket(0)
+            game.printMenu()
+            while True:
+                game.takeInput()
+                     
     
-    def handleServer(self):
+    def handleServer(self, game):
         connected = True
         while connected:
             packet_type, payload = self.recievePacket()
             if packet_type == 0: # Question
-                print(f'[QUESTION] {payload}')
+                #print(f'[STARTED] {payload}')
+                game.started = True
+                game.gotPoints = False
             elif packet_type == 1: # Remaining time
-                print(f'[TIME] Remaining: {payload}')
+                #print(f'[TIME] Remaining: {payload}')
+                game.time = payload
             elif packet_type == 2: # End game
-                print(f'[POINTS] Points: {payload}')
+                #print(f'[ENDED] Points: {payload}')
+                game.started = False
+                game.choice = -1
+                game.gotPoints = True
+                game.points = payload
+            game.printMenu()
 
 
     def auth(self):
@@ -57,11 +105,14 @@ class ClientSocket:
         if message == "Authentication unsuccesful.":
             return False
 
-        answer = input(message+" ")
+        answer = input("[MESSAGE] "+message+" ")
         self.socket.send(answer.encode())
         print(f'[AUTH SENT] Answer: {answer}')
 
-        return True
+        if answer == 'Y':
+            return True
+        else:
+            return False
 
     
     def sendPacket(self, packet_type, data=''):
@@ -70,7 +121,7 @@ class ClientSocket:
         packet = bytes([packet_type, payload_size])+payload
   
         self.socket.send(packet)
-        print(f'[SENT] PacketType: {packet_type} - Payload: {payload}')
+        #print(f'[SENT] PacketType: {packet_type} - Payload: {payload}')
     
 
     def recievePacket(self):
@@ -84,8 +135,11 @@ class ClientSocket:
             payload = int.from_bytes(packet[2:2+payload_size], byteorder='big', signed=False)
         elif packet_type == 2: # <Int-16>
             payload = int.from_bytes(packet[2:2+payload_size], byteorder='big', signed=True)
+        else:
+            print(f'[ERROR] PacketType: {packet_type}')
+            return (-1,-1)
 
-        print(f'[RECIEVED] PacketType: {packet_type} - Payload: {packet[2:2+payload_size]}')
+        #print(f'[RECIEVED] PacketType: {packet_type} - Payload: {packet[2:2+payload_size]}')
         return (packet_type, payload)
 
 
@@ -94,7 +148,7 @@ class ClientSocket:
     Example
         packet_type :   3  <Uint8>
         payload_size :  4  <Uint8>
-        payload :       even <Char array>
+        payload :       'even' <Char array>
         
         packet :        b'\x03\x02even'
 '''
