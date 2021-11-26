@@ -1,13 +1,12 @@
 import hashlib
 import socket
-import time
 import threading
-import string    
 import os
 
 
 startString = "Start_Connection"
-privateString = "PRIVATE_KEY_THIRTY_TWO_CHARACTER"
+privateString = "PRIVATE_STR_THIRTY_TWO_CHARACTER"
+
 
 clear = lambda : os.system('cls' if os.name == 'nt' else 'clear')
 
@@ -18,64 +17,67 @@ class Game:
         self.client = client
         self.choice = -1
         self.gotPoints = False
-        self.points = -1
+        self.points = 0
+        self.question = ''
     
-    def printMenu(self):       
+    def printMenu(self):
         clear()
         print("***** Number Guessing Game *****")
         if not self.started:
             if self.gotPoints:
-                print(f'Game over. You got {self.points} points!')
-            print('1. Start game\nEnter your choice:')
+                print(f'\nGame finished. You got {self.points} points!')
+            print('\n0. Start game\nq. Close connection\nEnter your choice:')
         else:
-            print(f'Remaining time : {self.time}\n1. Terminate game\n2. Get time\n3. Make a guess\nEnter your choice:')
-            if self.choice == 3:
-                print("3\nWhat is your guess? Number, even, odd?")
+            print(f'\nRemaining time : {self.time}\n\n1. Terminate game\n2. Get time\n3. Make a guess\nEnter your choice:')
 
     def takeInput(self):
-        self.choice = int(input())
-
-        if not self.started:
-            self.client.sendPacket(self.choice-1)
+        inp = input()
+        if inp == 'q':
+            self.client.close()
+            return
+        
+        self.choice = int(inp)
+        if self.choice not in [0,1,2,3]:
+            print("Invalid choice.")
         elif self.choice == 3:
-            g = input("What is your guess? Number, even, odd?\n")
-            self.client.sendPacket(self.choice, g)
-            self.printMenu()
+            guess = input(self.question)
+            if self.started:
+                self.client.sendPacket(self.choice, guess)
+                self.printMenu()
         else:
             self.client.sendPacket(self.choice)
 
         self.choice = -1
 
-    
 
 class ClientSocket:
     def __init__(self, HOST, PORT):
         self.HOST = HOST
         self.PORT = PORT
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.connected = False
         
-
     def start(self):
         self.socket.connect((self.HOST, self.PORT))
         print(f'[CONNECTING] {self.HOST}:{self.PORT}')
+        self.connected = True
 
         if self.auth():
             game = Game(self)
             threading.Thread(target=self.handleServer, args=(game,)).start()
             #self.sendPacket(0)
             game.printMenu()
-            while True:
+            while self.connected:
                 game.takeInput()
                      
-    
     def handleServer(self, game):
-        connected = True
-        while connected:
+        while self.connected:
             packet_type, payload = self.recievePacket()
             if packet_type == 0: # Question
                 #print(f'[STARTED] {payload}')
                 game.started = True
                 game.gotPoints = False
+                game.question = payload
             elif packet_type == 1: # Remaining time
                 #print(f'[TIME] Remaining: {payload}')
                 game.time = payload
@@ -85,8 +87,9 @@ class ClientSocket:
                 game.choice = -1
                 game.gotPoints = True
                 game.points = payload
-            game.printMenu()
-
+            
+            if game.choice != 3:
+                game.printMenu()
 
     def auth(self):
         self.socket.send(startString.encode())
@@ -113,7 +116,6 @@ class ClientSocket:
             return True
         else:
             return False
-
     
     def sendPacket(self, packet_type, data=''):
         payload = data.encode() # <CharArray>
@@ -123,9 +125,13 @@ class ClientSocket:
         self.socket.send(packet)
         #print(f'[SENT] PacketType: {packet_type} - Payload: {payload}')
     
-
     def recievePacket(self):
-        packet = self.socket.recv(1024)
+        try:
+            packet = self.socket.recv(1024)
+        except:
+            print("[CLOSED] Connection closed")
+            return (-1,-1)
+
         packet_type = packet[0]
         payload_size = packet[1]
 
@@ -142,6 +148,9 @@ class ClientSocket:
         #print(f'[RECIEVED] PacketType: {packet_type} - Payload: {packet[2:2+payload_size]}')
         return (packet_type, payload)
 
+    def close(self):
+        self.connected = False
+        self.socket.close()
 
 
 '''

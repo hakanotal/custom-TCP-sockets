@@ -5,15 +5,14 @@ import threading
 import string    
 import random
 
+
 startString = "Start_Connection"
-privateString = "PRIVATE_KEY_THIRTY_TWO_CHARACTER"
+privateString = "PRIVATE_STR_THIRTY_TWO_CHARACTER"
+
 
 class Game:
     def __init__(self):
-        self.points = 0
-        self.number = -1
-        self.startTime = -1
-        self.started = False
+        self.reset()
 
     def start(self):
         self.number = random.randint(0,36)
@@ -40,7 +39,6 @@ class Game:
             self.points -= 1
 
 
-
 class ServerSocket:
     def __init__(self, HOST, PORT):
         self.HOST = HOST
@@ -60,7 +58,6 @@ class ServerSocket:
             thread.start()
             print(f'[ACTIVE THREADS] {threading.activeCount()-1}')
 
-
     def handleClient(self, conn, addr):
         if self.auth(conn, addr):
             game = Game()
@@ -69,7 +66,12 @@ class ServerSocket:
                 # Recieve
                 packet_type, payload = self.recievePacket(conn, addr)
                 
-                if not game.started and packet_type == 0: # Start game
+                if (packet_type, payload) == (-1,-1):
+                    connected = False
+                    print("[CLOSED] Connection closed")
+                    conn.close()  
+                
+                elif not game.started and packet_type == 0: # Start game
                     self.sendPacket(conn, addr, 0, "What is your guess? Number, even, odd?")
                     game.start()
                     print(f'[GAME STARTED] Number: {game.number}')
@@ -88,13 +90,13 @@ class ServerSocket:
                 elif game.started and packet_type == 3: # Guess
                     game.guess(payload)
                     print(f'[GUESS] Number: {game.number} - Guess: {payload} - Points: {game.points}')
-                    game.number = random.randint(0,36)
+                    
+                    self.sendPacket(conn, addr, 2, game.points)
+                    print(f'[TERMINATE] Points: {game.points}')
+                    game.reset()
 
                 else:
                     print(f'[ERROR] PacketType: {packet_type} - Payload: {payload}')
-
-        conn.close()  
-
 
     def auth(self, conn, addr):
         randomString = str(''.join(random.choices(string.ascii_letters, k=32)))
@@ -125,7 +127,6 @@ class ServerSocket:
         conn.send(message.encode())
         print(f'[AUTH SENT] {message}')
         return False
-
     
     def sendPacket(self, conn, addr, packet_type, data):
         if packet_type == 0: # <CharArray>
@@ -141,9 +142,10 @@ class ServerSocket:
         conn.send(packet)
         print(f'[SENT] PacketType: {packet_type} - Payload: {payload}')
 
-
     def recievePacket(self, conn, addr):
         packet = conn.recv(1024)
+        if not packet:
+            return (-1,-1)
         packet_type = packet[0]
         payload_size = packet[1]
         payload = packet[2:2+payload_size]
@@ -151,14 +153,14 @@ class ServerSocket:
         print(f'[RECIEVED] PacketType: {packet_type} - Payload: {payload}')
         return (packet_type, payload.decode())
 
-
     def timer(self, conn, addr, game):   
         remaining = 30
         while remaining > 3:
             remaining = max(game.remaining(),0)
-            self.sendPacket(conn, addr, 1, remaining)
-            print(f'[TIME] Remaining: {remaining}')
-            time.sleep(3)  
+            if remaining > 0:
+                self.sendPacket(conn, addr, 1, remaining)
+                print(f'[TIME] Remaining: {remaining}')
+                time.sleep(3)  
 
         if game.started:
             self.sendPacket(conn, addr, 2, game.points)
@@ -166,15 +168,29 @@ class ServerSocket:
             game.reset()
 
 
-
 '''
-    Example
+    Example 1:
+        packet_type :   0  <Uint8>
+        payload_size :  38  <Uint8>
+        payload :       'What is your guess? Number, even, odd?' <CharArray>
+        
+        packet :        b'\x00&What is your guess? Number, even, odd?'
+    
+    Example 2:
+        packet_type :   1  <Uint8>
+        payload_size :  2  <Uint8>
+        payload :       21 <Uint16>
+        
+        packet :        b'\x00\x02\x00\x15'
+    
+    Example 3:
         packet_type :   2  <Uint8>
         payload_size :  2  <Uint8>
         payload :       -1 <Int16>
         
         packet :        b'\x02\x02\xff\xff'
 '''
+
 
 if __name__=="__main__":
     s = ServerSocket('127.0.0.1', 3001)
